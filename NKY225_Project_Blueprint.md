@@ -2,6 +2,8 @@
 
 > **Goal:** Construct a market-neutral, long-only active book over the NKY 225 constituents that maximises excess return (CAGR / Sharpe) against the index using machine-learning-derived optimal weights.
 
+> **Data window:** January 1, 2014 → present. Benchmark weights and constituent membership sourced from the **JPY121 ETF** (1321.T — Nomura Nikkei 225 ETF, TSE), which publishes daily holdings including stocks entering and leaving the index.
+
 ---
 
 ## Full Pipeline Flowchart
@@ -9,8 +11,8 @@
 ```mermaid
 flowchart TD
     %% ── DATA COLLECTION ──
-    A1["📈 NKY 225 Index Data\n(Yahoo Finance, J-Quants, Stooq)"]
-    A2["📊 Constituent Price & Volume\n(yfinance / J-Quants / Alpha Vantage)"]
+    A1["📈 NKY 225 Index Price\n(Yahoo Finance ^N225, J-Quants, Stooq)\nFrom: 2014-01-01"]
+    A2["📊 Constituent Price & Volume\n(yfinance / J-Quants / Alpha Vantage)\nFrom: 2014-01-01"]
     A3["🏦 Fundamental / Financial Statements\n(EDINET, J-Quants, SimFin)"]
     A4["🌐 Macro & Regime Indicators\n(FRED, BOJ, OECD, World Bank)"]
     A5["💬 Sentiment & Options Data\n(Nikkei VI, CBOE VIX via FRED)"]
@@ -24,7 +26,7 @@ flowchart TD
     B --> C
 
     %% ── DATA CLEANING ──
-    C["🧹 Data Cleaning\n• Survivorship-bias-free universe\n• Point-in-time (PIT) alignment\n• Outlier winsorisation\n• Missing value imputation\n• Corporate action adjustment"]
+    C["🧹 Data Cleaning\n• Universe from JPY121 ETF (1321.T) holdings\n• Constituent in/out events tracked daily\n• Benchmark weights w_bench from ETF\n• Point-in-time (PIT) alignment\n• Outlier winsorisation · imputation\n• Corporate action adjustment"]
 
     C --> D
 
@@ -87,27 +89,58 @@ flowchart TD
 
 ## 1. Data Collection
 
+> **Collection window: January 1, 2014 → present** (~11 years of daily data across all categories below).
+
 ### 1.1 NKY 225 Index Price Data
 
 | Source | URL / Library | Notes |
 |---|---|---|
-| Yahoo Finance | `yfinance` — ticker `^N225` | Daily OHLCV, free, easy Python access |
+| Yahoo Finance | `yfinance` — ticker `^N225` | Daily OHLCV from 2014-01-01; free |
 | Stooq | `pandas_datareader` stooq driver | Clean historical data, good for backtesting |
 | J-Quants API | `jquantsapi` Python client | Japan-specific, free tier, official TSE data |
 | Quandl / Nasdaq Data Link | `nasdaq-data-link` | Some Japan indices available; requires API key |
 | Investing.com | Web scrape / unofficial APIs | Rich history but TOS-restricted scraping |
 
-### 1.2 NKY 225 Constituent Stock Price & Volume Data
+### 1.2 Constituent Universe, Weights & Membership Tracking
+
+The **JPY121 ETF** (ticker: `1321.T` on TSE — Nomura Asset Management Nikkei 225 ETF) is the primary source for both benchmark weights and constituent membership history. It publishes daily holdings disclosures that capture exactly which stocks are in the index at any point in time, and at what weight.
+
+#### Why JPY121 / 1321.T?
+
+- **Daily weight snapshots:** Holdings filings give precise `w_bench_i` per stock per date — the exact values needed for active-weight construction (`δw_i = w_i − w_bench_i`).
+- **In/out events captured automatically:** When Nikkei Inc. reconstitutes the index (typically annually in October, plus ad-hoc replacements for delistings/mergers), the ETF holdings update the same day. Stocks that enter the index appear in the next day's filing; stocks that leave drop to zero.
+- **Avoids survivorship bias:** By tracking the full historical holdings — including stocks later removed — the universe stays complete and unbiased.
+- **Price-weighting reflected accurately:** The NKY 225 is a price-weighted index (not market-cap weighted); the ETF holdings capture this correctly, unlike market-cap databases.
+
+#### Constituent Tracking Workflow
+
+```
+Daily: Download 1321.T holdings from ETF issuer or J-Quants
+         ↓
+Build constituent panel:  date × stock → {in_index: bool, bench_weight: float}
+         ↓
+Flag constituent events:
+  • ADDED:   first date stock appears in holdings  →  treat prior days as non-member
+  • REMOVED: last date stock appears in holdings   →  include delisting return on exit day
+  • WEIGHT CHANGE: large mid-period weight shifts  →  due to divisor adjustments
+         ↓
+For each stock, label:
+  • member_start_date
+  • member_end_date  (NaT if still active)
+  • daily w_bench_i  (price weight, normalised to sum=1)
+```
+
+#### Price & Volume Data Sources
 
 | Source | URL / Library | Notes |
 |---|---|---|
-| Yahoo Finance | `yfinance` (e.g., `7203.T` for Toyota) | Free; `.T` suffix for TSE stocks |
+| Yahoo Finance | `yfinance` (e.g., `7203.T` for Toyota) | Free; `.T` suffix; pull from 2014-01-01 |
 | J-Quants API | `jquantsapi` | Best source for Japan stocks; PIT adjustments |
 | Alpha Vantage | `alpha_vantage` Python client | Free tier (5 req/min); daily & intraday |
 | Stooq | `pandas_datareader` | Reliable free historical OHLCV |
 | EDINET | `edinet-client` | Official FSA filings; useful for events |
 
-> **Universe:** Pull the current + historical constituent lists from J-Quants or Nikkei's published constituent history to build a **survivorship-bias-free** universe.
+> **Important:** Pull price data for **all stocks ever in the 1321.T holdings since 2014-01-01**, not just current constituents. This gives a survivorship-bias-free universe of ~270–300 unique stocks over the full period.
 
 ### 1.3 Fundamental Data (44 factors)
 
@@ -196,53 +229,68 @@ import talib                # TA-Lib — C-backed, fast
 ## 2. Data Cleaning Pipeline
 
 ```
-Raw Data
+Raw Data  (2014-01-01 → present)
    │
    ▼
-[1] Survivorship-Bias-Free Universe
-    • Load historical constituent lists (monthly snapshots)
-    • Include delisted/merged stocks; map ISIN/ticker changes
+[1] Survivorship-Bias-Free Universe  ← driven by JPY121 / 1321.T ETF holdings
+    • Load daily 1321.T holdings filings from 2014-01-01
+    • Build full historical constituent panel: every stock ever in the index
+    • Label each stock's entry date (ADDED) and exit date (REMOVED)
+    • On removal: capture final-day return including any delisting/M&A price
+    • Map ticker / ISIN changes for stocks that were renamed or merged
+    • ~270–300 unique stocks across the full 11-year window
    │
    ▼
-[2] Point-in-Time (PIT) Alignment
+[2] Benchmark Weight Alignment  ← from JPY121 / 1321.T daily holdings
+    • For each date t and each stock i:
+        w_bench_{i,t}  = ETF holding weight (price-weighted, normalised)
+    • For stocks not in index on date t:  w_bench_{i,t} = 0
+    • Flag large weight shifts mid-period (index divisor adjustments)
+    • These weights become the target for active-weight construction (δw_i)
+   │
+   ▼
+[3] Point-in-Time (PIT) Alignment
     • All fundamental data stamped at announcement date, not period-end
     • Prevent look-ahead bias — no future data leaks into the feature set
     • Use J-Quants announcement_date field or EDINET disclosure timestamps
    │
    ▼
-[3] Outlier Winsorisation
+[4] Outlier Winsorisation
     • Winsorise each factor at 1st and 99th percentile (cross-sectional, per date)
     • Alternative: apply after z-scoring and clip at ±7σ (as per this pipeline)
    │
    ▼
-[4] Missing Value Imputation
+[5] Missing Value Imputation
     • Price data: forward-fill up to 5 trading days (halted stocks)
     • Fundamental data: carry-forward from last reported period (LOCF)
     • If missing > 20 consecutive days: set to NaN; exclude from IC calculation
+    • Stocks removed from index: retain data up to removal date only
    │
    ▼
-[5] Corporate Action Adjustment
+[6] Corporate Action Adjustment
     • Apply split / dividend adjustment factors from J-Quants or yfinance
     • Ensure all price series are on a total-return-equivalent basis
    │
    ▼
-[6] Cross-Sectional Z-Score (CS normalisation)
+[7] Cross-Sectional Z-Score (CS normalisation)
     • For each factor f on each date t:
       z_{i,t} = (f_{i,t} − mean_t(f)) / std_t(f)
     • Makes all stocks comparable on a given date
    │
    ▼
-[7] Time-Series Z-Score (TS normalisation)  [optional second pass]
+[8] Time-Series Z-Score (TS normalisation)  [optional second pass]
     • Normalise each factor for each stock over its own rolling history
     • Stabilises regime-shifts in long-run factor means
    │
    ▼
-[8] Clip to ±7σ
+[9] Clip to ±7σ
     • Hard-cap remaining extreme outliers after normalisation
    │
    ▼
 Clean Feature Panel
 (Date × Stock × ~270 Normalised Features)
++ Benchmark weight column  w_bench_{i,t}  from JPY121 ETF
++ Membership flag          in_index_{i,t}  ∈ {0, 1}
 ```
 
 ---
@@ -401,6 +449,10 @@ Long-only weights       (short the index)       Market exposure = 0
 δw_i = w_i − w_bench_i        (deviation from benchmark weight)
 Σ δw_i = 0                    (active-neutral: longs = shorts vs bench)
 w_bench_i + δw_i ≥ 0          (long-only constraint maintained)
+
+w_bench_i  ← sourced daily from JPY121 ETF (1321.T) holdings
+           ← price-weighted, normalised to sum = 1 across all constituents
+           ← = 0 for any stock not in the index on that date
 ```
 
 ---
