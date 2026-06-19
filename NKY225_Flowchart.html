@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>NKY 225 — ML Pipeline</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0f1117;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #e2e8f0;
+    padding: 48px 32px 80px;
+    min-width: 900px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #f8fafc;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #64748b;
+    font-size: 0.85rem;
+    margin-bottom: 44px;
+  }
+
+  /* ── LANE WRAPPER ── */
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  /* ── PHASE BLOCK ── */
+  .phase {
+    width: 100%;
+    border-radius: 14px;
+    border: 1.5px solid;
+    overflow: hidden;
+    margin-bottom: 0;
+  }
+
+  .phase-header {
+    padding: 9px 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+  }
+
+  .phase-body {
+    padding: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  /* ── NODE ── */
+  .node {
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    min-width: 160px;
+    max-width: 200px;
+    flex: 1 1 160px;
+    position: relative;
+  }
+
+  .node .title {
+    font-weight: 700;
+    font-size: 0.82rem;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  .node .detail {
+    color: #94a3b8;
+    font-size: 0.74rem;
+    line-height: 1.5;
+  }
+
+  /* ── ARROW ── */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0;
+    padding: 2px 0;
+    gap: 0;
+  }
+  .arrow-line {
+    width: 2px;
+    height: 28px;
+    background: #334155;
+  }
+  .arrow-head {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 10px solid #334155;
+  }
+  .arrow-label {
+    font-size: 0.68rem;
+    color: #475569;
+    margin: -2px 0 2px;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── MERGE ARROWS (for the two legs joining) ── */
+  .merge-row {
+    display: flex;
+    width: 100%;
+    max-width: 960px;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 0;
+    margin: 0;
+  }
+  .merge-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+  }
+
+  /* ── COLOUR THEMES ── */
+  /* Data */
+  .phase--data { border-color: #1d4ed8; }
+  .phase--data .phase-header { background: #1e3a5f; color: #93c5fd; }
+  .phase--data .phase-body   { background: #0f172a; }
+  .phase--data .node         { background: #172554; border: 1px solid #1d4ed8; }
+  .phase--data .node .title  { color: #93c5fd; }
+
+  /* Cleaning */
+  .phase--clean { border-color: #0891b2; }
+  .phase--clean .phase-header { background: #164e63; color: #67e8f9; }
+  .phase--clean .phase-body   { background: #0c1a20; }
+  .phase--clean .node         { background: #083344; border: 1px solid #0891b2; }
+  .phase--clean .node .title  { color: #67e8f9; }
+
+  /* Phase 1 */
+  .phase--p1 { border-color: #16a34a; }
+  .phase--p1 .phase-header { background: #14532d; color: #86efac; }
+  .phase--p1 .phase-body   { background: #0c1a12; }
+  .phase--p1 .node         { background: #052e16; border: 1px solid #16a34a; }
+  .phase--p1 .node .title  { color: #86efac; }
+
+  /* Phase 2 */
+  .phase--p2 { border-color: #7c3aed; }
+  .phase--p2 .phase-header { background: #3b0764; color: #c4b5fd; }
+  .phase--p2 .phase-body   { background: #140a20; }
+  .phase--p2 .node         { background: #2e1065; border: 1px solid #7c3aed; }
+  .phase--p2 .node .title  { color: #c4b5fd; }
+
+  /* Phase 3 */
+  .phase--p3 { border-color: #d97706; }
+  .phase--p3 .phase-header { background: #451a03; color: #fcd34d; }
+  .phase--p3 .phase-body   { background: #1a0e00; }
+  .phase--p3 .node         { background: #292204; border: 1px solid #d97706; }
+  .phase--p3 .node .title  { color: #fcd34d; }
+
+  /* Market neutral */
+  .phase--mn { border-color: #dc2626; }
+  .phase--mn .phase-header { background: #450a0a; color: #fca5a5; }
+  .phase--mn .phase-body   { background: #150505; }
+  .phase--mn .node         { background: #300a0a; border: 1px solid #dc2626; }
+  .phase--mn .node .title  { color: #fca5a5; }
+
+  /* Output */
+  .phase--out { border-color: #059669; }
+  .phase--out .phase-header { background: #064e3b; color: #6ee7b7; }
+  .phase--out .phase-body   { background: #021a12; }
+  .phase--out .node         { background: #022c22; border: 1px solid #059669; }
+  .phase--out .node .title  { color: #6ee7b7; }
+
+  /* ── DIVIDER inside a phase ── */
+  .divider {
+    width: 100%;
+    height: 1px;
+    background: #1e293b;
+    margin: 4px 0 8px;
+  }
+
+  /* ── ROW layout inside phase body ── */
+  .row { display: flex; gap: 12px; width: 100%; justify-content: center; flex-wrap: wrap; }
+
+  /* ── INLINE ARROW (horizontal) ── */
+  .harrow {
+    display: flex;
+    align-items: center;
+    color: #475569;
+    font-size: 1.1rem;
+    padding: 0 4px;
+    align-self: center;
+  }
+
+  /* constraint grid */
+  .constraints {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    width: 100%;
+  }
+  .constraint-pill {
+    background: #1c1400;
+    border: 1px solid #854d0e;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.72rem;
+    color: #fbbf24;
+  }
+  .constraint-pill .cid {
+    font-weight: 700;
+    color: #fcd34d;
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  /* metrics row */
+  .metrics {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .metric-box {
+    background: #022c22;
+    border: 1px solid #059669;
+    border-radius: 10px;
+    padding: 14px 22px;
+    text-align: center;
+    min-width: 130px;
+  }
+  .metric-box .val {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #6ee7b7;
+  }
+  .metric-box .lbl {
+    font-size: 0.7rem;
+    color: #64748b;
+    margin-top: 3px;
+  }
+</style>
+</head>
+<body>
+
+<h1>NKY 225 Enhanced Index — ML Alpha Pipeline</h1>
+<p class="subtitle">Market-neutral active weight strategy · Data → Features → Signal Models → QP Optimisation</p>
+
+<div class="pipeline">
+
+  <!-- ══════════════════════════════ DATA COLLECTION ══════════════════════════════ -->
+  <div class="phase phase--data">
+    <div class="phase-header">① Data Collection</div>
+    <div class="phase-body">
+      <div class="node">
+        <span class="title">📈 Index Price</span>
+        <span class="detail">Yahoo Finance <code>^N225</code><br>J-Quants API · Stooq<br><em>Daily OHLCV</em></span>
+      </div>
+      <div class="node">
+        <span class="title">📊 Constituent OHLCV</span>
+        <span class="detail">yfinance (e.g. <code>7203.T</code>)<br>J-Quants · Alpha Vantage<br><em>~225 stocks</em></span>
+      </div>
+      <div class="node">
+        <span class="title">🏦 Fundamentals</span>
+        <span class="detail">EDINET (FSA filings)<br>J-Quants <code>/fins/statements</code><br>SimFin<br><em>P/E, ROE, margins…</em></span>
+      </div>
+      <div class="node">
+        <span class="title">🌐 Macro & Regime</span>
+        <span class="detail">FRED (<code>fredapi</code>)<br>BOJ API · OECD<br>Cabinet Office Japan<br><em>USD/JPY, JGB, PMI…</em></span>
+      </div>
+      <div class="node">
+        <span class="title">💬 Sentiment</span>
+        <span class="detail">Nikkei VI (JPX)<br>CBOE VIX via FRED<br>TSE short interest<br><em>19 factors</em></span>
+      </div>
+      <div class="node">
+        <span class="title">📅 Calendar & Cross-Section</span>
+        <span class="detail">Derived from price + dates<br>Sector relative value<br><em>35 factors</em></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-label">~300 raw factors</div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ FACTOR STORE + CLEANING ══════════════════════════════ -->
+  <div class="phase phase--clean">
+    <div class="phase-header">② Raw Factor Store → Data Cleaning → Normalisation</div>
+    <div class="phase-body">
+      <div class="row">
+        <div class="node" style="max-width:220px">
+          <span class="title">🗃️ Raw Factor Store</span>
+          <span class="detail">~300 factors across<br>Momentum · Volatility · Liquidity<br>Fundamental · Macro · Sentiment</span>
+        </div>
+        <div class="harrow">→</div>
+        <div class="node" style="max-width:260px">
+          <span class="title">🧹 Data Cleaning</span>
+          <span class="detail">
+            ① Survivorship-bias-free universe<br>
+            ② Point-in-time (PIT) alignment<br>
+            ③ Winsorise at p1 / p99 cross-sectionally<br>
+            ④ Missing values → LOCF imputation<br>
+            ⑤ Corporate action adjustment
+          </span>
+        </div>
+        <div class="harrow">→</div>
+        <div class="node" style="max-width:240px">
+          <span class="title">📐 Normalisation</span>
+          <span class="detail">
+            Cross-sectional z-score per date<br>
+            → optional TS z-score per stock<br>
+            → hard clip to <strong>±7σ</strong>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-label">daily × ~305 stocks × ~270 features</div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ CLEAN PANEL ══════════════════════════════ -->
+  <div class="phase phase--clean" style="border-color:#0e7490">
+    <div class="phase-header" style="background:#0c4a6e;color:#7dd3fc">Clean Feature Panel — ~480,000 observations</div>
+    <div class="phase-body" style="justify-content:center;padding:14px 20px">
+      <span style="font-size:0.8rem;color:#7dd3fc;text-align:center">
+        Date × ~305 Stocks × ~270 Normalised Features &nbsp;|&nbsp;
+        Momentum (41) · Volatility (37) · Volume/Liquidity (25) · Fundamental (44) · Macro (44) · Sentiment (19) · Cross-Section (14) · Calendar (21)
+      </span>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ PHASE 1 ══════════════════════════════ -->
+  <div class="phase phase--p1">
+    <div class="phase-header">Phase 1 — Feature Selection</div>
+    <div class="phase-body">
+      <div class="row">
+        <div class="node" style="max-width:280px">
+          <span class="title">🔍 Univariate IC Ranking</span>
+          <span class="detail">
+            Rank every feature by standalone<br>
+            <strong>cross-sectional Spearman IC</strong><br>
+            against forward returns<br>
+            Purged walk-forward (no leakage)
+          </span>
+        </div>
+        <div class="harrow">→</div>
+        <div class="node" style="max-width:280px">
+          <span class="title">🏆 Top K = 50 Features (locked)</span>
+          <span class="detail">
+            Keep features with:<br>
+            • Highest mean |IC|<br>
+            • Stable IC sign ≥ 70% of months<br>
+            One set, used by <strong>all downstream models</strong>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-label">50-feature panel (purged, leak-free)</div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ PHASE 2 ══════════════════════════════ -->
+  <div class="phase phase--p2">
+    <div class="phase-header">Phase 2 — Signal Models (Two Complementary Models)</div>
+    <div class="phase-body">
+      <div class="row">
+        <div class="node" style="max-width:240px">
+          <span class="title">🏅 LGBMRanker</span>
+          <span class="detail">
+            <strong>LambdaRank loss</strong><br>
+            Learns relative ORDER of stocks<br>
+            (which names beat the index)<br>
+            Covered IC ≈ 0.025
+          </span>
+        </div>
+        <div class="node" style="max-width:240px">
+          <span class="title">📉 LightGBM-Huber</span>
+          <span class="detail">
+            <strong>Huber loss</strong> = L2 small + L1 large<br>
+            Predicts return <em>size</em>, outlier-robust<br>
+            Covered IC ≈ 0.045<br>
+            Uncovered IC ≈ 0.12
+          </span>
+        </div>
+        <div class="node" style="max-width:240px">
+          <span class="title">🔀 Signal Routing</span>
+          <span class="detail">
+            <strong>Covered stocks →</strong><br>
+            Huber + Ranker blend<br>
+            <strong>Uncovered stocks →</strong><br>
+            Huber only
+          </span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div style="font-size:0.72rem;color:#64748b;width:100%;text-align:center">
+        Walk-forward expanding window · Monthly retraining · Purge gap between train and test to avoid leakage
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-label">Grinold-Kahn: α = IC × σ × score</div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ PHASE 3 ══════════════════════════════ -->
+  <div class="phase phase--p3">
+    <div class="phase-header">Phase 3 — Portfolio Optimisation (QP · CLARABEL Solver)</div>
+    <div class="phase-body">
+      <div style="width:100%;text-align:center;font-size:0.78rem;color:#fcd34d;margin-bottom:12px">
+        <strong>Objective:</strong> &nbsp; maximise &nbsp; αᵀδw − λ · δwᵀΩδw &nbsp; (return minus risk-aversion penalty)
+      </div>
+      <div class="constraints">
+        <div class="constraint-pill"><span class="cid">C1</span>Σw = 1<br><span style="color:#a16207">Fully invested</span></div>
+        <div class="constraint-pill"><span class="cid">C2</span>w_bench + δw ≥ 0<br><span style="color:#a16207">Long-only</span></div>
+        <div class="constraint-pill"><span class="cid">C3</span>β caps by tier<br><span style="color:#a16207">Large / Mid / Small</span></div>
+        <div class="constraint-pill"><span class="cid">C4</span>δw = 0 (no signal)<br><span style="color:#a16207">Passive fallback</span></div>
+        <div class="constraint-pill"><span class="cid">C5</span>TE ≤ budget<br><span style="color:#a16207">Active risk cap</span></div>
+        <div class="constraint-pill"><span class="cid">C6</span>|sector Δw| ≤ cap<br><span style="color:#a16207">Sector exposure</span></div>
+        <div class="constraint-pill"><span class="cid">C7</span>Turnover ≤ budget<br><span style="color:#a16207">Cost control</span></div>
+        <div class="constraint-pill" style="border-color:#d97706;background:#1a1000"><span class="cid" style="color:#fb923c">TE def.</span>√(δwᵀΩδw) × √252<br><span style="color:#a16207">Target > 2% ann.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-label">active weights δw_i = w_i − w_bench_i</div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ MARKET NEUTRAL ══════════════════════════════ -->
+  <div class="phase phase--mn">
+    <div class="phase-header">Market-Neutral Active Book — NET = 0%</div>
+    <div class="phase-body">
+      <div class="row" style="align-items:center">
+        <div class="node" style="max-width:220px;text-align:center;border-color:#166534;background:#052e16">
+          <span class="title" style="color:#86efac">📗 LONG LEG</span>
+          <span class="detail">~225 NKY constituents<br>Fully invested · long-only<br>Overweight high-alpha stocks</span>
+        </div>
+        <div style="font-size:1.6rem;color:#475569;padding:0 8px">＋</div>
+        <div class="node" style="max-width:220px;text-align:center">
+          <span class="title">📕 SHORT LEG</span>
+          <span class="detail">NKY 225 index ~100%<br>via futures / ETF<br>Hedges market beta</span>
+        </div>
+        <div style="font-size:1.6rem;color:#475569;padding:0 8px">＝</div>
+        <div class="node" style="max-width:240px;text-align:center;border-color:#7c3aed;background:#2e1065">
+          <span class="title" style="color:#c4b5fd">NET = 0% Market Exposure</span>
+          <span class="detail">Delta-neutral · Active P&amp;L only<br>Σδw_i · (r_i − r_index)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- ══════════════════════════════ OUTPUT METRICS ══════════════════════════════ -->
+  <div class="phase phase--out">
+    <div class="phase-header">🚀 Live Portfolio — Target Performance</div>
+    <div class="phase-body">
+      <div class="metrics">
+        <div class="metric-box">
+          <div class="val">11.3%</div>
+          <div class="lbl">CAGR (Active Return)</div>
+        </div>
+        <div class="metric-box">
+          <div class="val">5.76</div>
+          <div class="lbl">Sharpe Ratio</div>
+        </div>
+        <div class="metric-box">
+          <div class="val">&gt; 2%</div>
+          <div class="lbl">Annualised TE (5d)</div>
+        </div>
+        <div class="metric-box">
+          <div class="val">Monthly</div>
+          <div class="lbl">Rebalance Frequency</div>
+        </div>
+        <div class="metric-box">
+          <div class="val">0.045</div>
+          <div class="lbl">Signal IC (Huber, covered)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /pipeline -->
+
+</body>
+</html>
