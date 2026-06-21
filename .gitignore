@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 nky225_features.parquet
 _cache/
+NKY225_Panel_Dashboard.pdf
