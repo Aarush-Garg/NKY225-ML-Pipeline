@@ -516,7 +516,8 @@ def main():
         log.info("Merging into feature panel %s …", OUT_FEATS.name)
         feats = pd.read_parquet(OUT_FEATS)
 
-        # Align on shared (date, ticker) pairs
+        # Drop stale copies of these columns if a previous run already added them
+        feats = feats.drop(columns=[c for c in ["in_index", "bench_weight"] if c in feats.columns])
         merged = feats.join(const_panel, how="left")
         merged["in_index"]     = merged["in_index"].fillna(False)
         merged["bench_weight"] = merged["bench_weight"].fillna(0.0)
