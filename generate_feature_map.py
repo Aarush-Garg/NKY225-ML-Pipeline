@@ -1,0 +1,239 @@
+"""
+Generate feature_source_map.csv
+Maps every column in nky225_features.parquet to its data source,
+download ticker, computation script, group, and research tier.
+"""
+
+import pandas as pd
+from pathlib import Path
+
+ROWS = [
+    # ─────────────────────────────────────────────────────────────────
+    # RAW OHLCV  — yfinance, ticker = {code}.T
+    # ─────────────────────────────────────────────────────────────────
+    ("close",        "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "Raw download",          "No",  "stock-specific", "—"),
+    ("high",         "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "Raw download",          "No",  "stock-specific", "—"),
+    ("low",          "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "Raw download",          "No",  "stock-specific", "—"),
+    ("open",         "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "Raw download",          "No",  "stock-specific", "—"),
+    ("volume",       "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "Raw download",          "No",  "stock-specific", "—"),
+    ("yen_volume",   "Price & OHLCV", "yfinance",  "{code}.T",  "build_feature_panel.py", "close × volume",        "No",  "stock-specific", "—"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # RETURNS — computed from close price
+    # ─────────────────────────────────────────────────────────────────
+    ("ret_1d",        "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(1)",    "No", "stock-specific", "—"),
+    ("ret_1w",        "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(5)",    "No", "stock-specific", "—"),
+    ("ret_1m",        "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(21)",   "No", "stock-specific", "—"),
+    ("ret_3m",        "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(63)",   "No", "stock-specific", "—"),
+    ("ret_6m",        "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(126)",  "No", "stock-specific", "—"),
+    ("ret_12m",       "Returns", "yfinance", "{code}.T", "build_feature_panel.py", "close.pct_change(252)",  "No", "stock-specific", "—"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # REVERSAL & MOMENTUM — derived from returns
+    # ─────────────────────────────────────────────────────────────────
+    ("reversal_1w",    "Reversal & Momentum", "yfinance", "{code}.T", "build_feature_panel.py", "-ret_1w",                                    "No", "stock-specific", "Tier 1"),
+    ("reversal_1m",    "Reversal & Momentum", "yfinance", "{code}.T", "build_feature_panel.py", "-ret_1m",                                    "No", "stock-specific", "Tier 1"),
+    ("momentum_12_1",  "Reversal & Momentum", "yfinance", "{code}.T", "build_feature_panel.py", "close.shift(21).pct_change(231)",            "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # VOLATILITY — rolling std of log returns
+    # ─────────────────────────────────────────────────────────────────
+    ("vol_20d",       "Volatility", "yfinance", "{code}.T", "build_feature_panel.py", "std(log_ret, 20) × √252",    "No", "stock-specific", "Tier 1"),
+    ("vol_60d",       "Volatility", "yfinance", "{code}.T", "build_feature_panel.py", "std(log_ret, 60) × √252",    "No", "stock-specific", "Tier 1"),
+    ("vol_120d",      "Volatility", "yfinance", "{code}.T", "build_feature_panel.py", "std(log_ret, 120) × √252",   "No", "stock-specific", "Tier 2"),
+    ("vol_parkinson",  "Volatility", "yfinance", "{code}.T", "build_feature_panel.py", "Parkinson range estimator", "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # CLASSIC TECHNICAL INDICATORS — computed from OHLCV
+    # ─────────────────────────────────────────────────────────────────
+    ("rsi_14",         "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "Wilder RSI, 14-period",         "No", "stock-specific", "Tier 2"),
+    ("macd_line",      "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "EMA(12) - EMA(26)",             "No", "stock-specific", "Tier 2"),
+    ("macd_signal",    "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "EMA(9) of macd_line",           "No", "stock-specific", "Tier 2"),
+    ("macd_hist",      "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "macd_line - macd_signal",       "No", "stock-specific", "Tier 2"),
+    ("bb_pos",         "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "Bollinger Band position 20D",   "No", "stock-specific", "Tier 2"),
+    ("bb_width",       "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "Bollinger Band width 20D",      "No", "stock-specific", "Tier 2"),
+    ("ema_cross_5_20", "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "EMA(5)/EMA(20) - 1",            "No", "stock-specific", "Tier 2"),
+    ("ema_cross_50_200","Technical","yfinance", "{code}.T", "build_feature_panel.py", "EMA(50)/EMA(200) - 1",          "No", "stock-specific", "Tier 2"),
+    ("high_to_price",  "Technical", "yfinance", "{code}.T", "build_feature_panel.py", "52-week high / close",          "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # MICROSTRUCTURE
+    # ─────────────────────────────────────────────────────────────────
+    ("amihud_60d",     "Microstructure", "yfinance", "{code}.T", "build_feature_panel.py", "mean(|ret|/yen_vol, 60D)",  "No", "stock-specific", "Tier 1"),
+    ("rel_volume_5_60","Microstructure", "yfinance", "{code}.T", "build_feature_panel.py", "vol_avg(5D)/vol_avg(60D)",  "No", "stock-specific", "Tier 2"),
+    ("log_yen_volume", "Microstructure", "yfinance", "{code}.T", "build_feature_panel.py", "log(close × volume)",       "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # MARKET BETA — rolling OLS vs NKY 225 index
+    # ─────────────────────────────────────────────────────────────────
+    ("beta_nky_60d",   "Market Beta", "yfinance", "{code}.T + ^N225", "build_feature_panel.py", "OLS beta vs NKY 225, 60D",  "No", "stock-specific", "Tier 2"),
+    ("beta_nky_252d",  "Market Beta", "yfinance", "{code}.T + ^N225", "build_feature_panel.py", "OLS beta vs NKY 225, 252D", "No", "stock-specific", "Tier 2"),
+    ("beta_usdjpy_60d","Market Beta", "yfinance", "{code}.T + JPY=X", "add_features.py",        "OLS beta vs USD/JPY, 60D (fixed FX alignment)", "No", "stock-specific", "Tier 1"),
+    ("idio_vol_60d",   "Market Beta", "yfinance", "{code}.T + ^N225", "build_feature_panel.py", "std(OLS residuals, 60D) × √252", "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # MACRO (cross-sectional — same value for all stocks on a date)
+    # ─────────────────────────────────────────────────────────────────
+    ("usdjpy_ret_1m",  "Macro", "yfinance", "JPY=X",  "build_feature_panel.py", "log(usdjpy).diff().rolling(21).sum()", "No", "date-level", "Tier 1"),
+    ("usdjpy_ret_3m",  "Macro", "yfinance", "JPY=X",  "build_feature_panel.py", "log(usdjpy).diff().rolling(63).sum()", "No", "date-level", "Tier 1"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # CALENDAR — derived from date, no download
+    # ─────────────────────────────────────────────────────────────────
+    ("fiscal_year_end_flag", "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "month == 3",             "No", "date-level", "Tier 3"),
+    ("pre_fiscal_year_end",  "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "month == 2",             "No", "date-level", "Tier 3"),
+    ("ex_div_season",        "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "month in [6,7,8,9]",     "No", "date-level", "Tier 3"),
+    ("golden_week",          "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "late Apr–early May flag", "No", "date-level", "Tier 3"),
+    ("obon_holiday",         "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "Aug 13–16 flag",          "No", "date-level", "Tier 3"),
+    ("calendar_year_end",    "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "month == 12",            "No", "date-level", "Tier 3"),
+    ("day_of_week",          "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "0=Mon … 4=Fri",          "No", "date-level", "Tier 3"),
+    ("is_monday",            "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "dayofweek == 0",         "No", "date-level", "Tier 3"),
+    ("is_friday",            "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "dayofweek == 4",         "No", "date-level", "Tier 3"),
+    ("fiscal_quarter",       "Calendar", "Date arithmetic", "—", "build_feature_panel.py", "Japan FY quarter 1–4",   "No", "date-level", "Tier 3"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # UNIVERSE / CONSTITUENT
+    # ─────────────────────────────────────────────────────────────────
+    ("in_index",    "Universe", "Nikkei Inc. / JPY121 ETF (1321.T)", "CHANGE_LOG", "build_constituent_history.py", "Backward-propagated from change log", "No", "stock-specific", "Tier 1"),
+    ("bench_weight","Universe", "Nikkei Inc. / JPY121 ETF (1321.T)", "1321.T close prices", "build_constituent_history.py", "price_i / Σ price_j (price-weighted)", "No", "stock-specific", "Tier 1"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP A — ADVANCED TECHNICAL OSCILLATORS  (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("stoch_k",       "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Stochastic %K, 14-period",          "No", "stock-specific", "Tier 2"),
+    ("stoch_d",       "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "SMA(3) of stoch_k",                 "No", "stock-specific", "Tier 2"),
+    ("stoch_kd_cross","Adv. Technical", "yfinance", "{code}.T", "add_features.py", "stoch_k - stoch_d",                 "No", "stock-specific", "Tier 2"),
+    ("atr_14",        "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Average True Range, 14-period",     "No", "stock-specific", "Tier 2"),
+    ("atr_pct",       "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "atr_14 / close",                    "No", "stock-specific", "Tier 2"),
+    ("atr_norm_ret",  "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "ret_1m / atr_14 (ATR-normalised momentum)", "No", "stock-specific", "Tier 2"),
+    ("williams_r",    "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Williams %R, 14-period [-100,0]",   "No", "stock-specific", "Tier 2"),
+    ("cci_20",        "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Commodity Channel Index, 20-period","No", "stock-specific", "Tier 2"),
+    ("mfi_14",        "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Money Flow Index, 14-period",       "No", "stock-specific", "Tier 2"),
+    ("roc_5",         "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Rate of Change, 5-period (%)",      "No", "stock-specific", "Tier 2"),
+    ("roc_10",        "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Rate of Change, 10-period (%)",     "No", "stock-specific", "Tier 2"),
+    ("roc_20",        "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Rate of Change, 20-period (%)",     "No", "stock-specific", "Tier 2"),
+    ("obv",           "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "On-Balance Volume (cumulative)",    "No", "stock-specific", "Tier 2"),
+    ("obv_ret_1m",    "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "OBV.pct_change(21)",                "No", "stock-specific", "Tier 2"),
+    ("obv_ret_3m",    "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "OBV.pct_change(63)",                "No", "stock-specific", "Tier 2"),
+    ("donchian_pos",  "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Donchian channel position 20D",    "No", "stock-specific", "Tier 2"),
+    ("keltner_pos",   "Adv. Technical", "yfinance", "{code}.T", "add_features.py", "Keltner channel position 20D",     "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP B — TAIL RISK / DISTRIBUTION  (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("skew_20d",           "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Realised skewness, 20D",                  "No", "stock-specific", "Tier 2"),
+    ("skew_60d",           "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Realised skewness, 60D",                  "No", "stock-specific", "Tier 2"),
+    ("kurt_20d",           "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Realised excess kurtosis, 20D",           "No", "stock-specific", "Tier 2"),
+    ("kurt_60d",           "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Realised excess kurtosis, 60D",           "No", "stock-specific", "Tier 2"),
+    ("max_ret_1m",         "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Max 1D return in past 21D (Bali 2011)",   "No", "stock-specific", "Tier 2"),
+    ("min_ret_1m",         "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Min 1D return in past 21D",               "No", "stock-specific", "Tier 2"),
+    ("var_95_20d",         "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Historical VaR 95%, 20D",                 "No", "stock-specific", "Tier 2"),
+    ("cvar_95_20d",        "Tail Risk", "yfinance", "{code}.T", "add_features.py", "CVaR / Expected Shortfall 95%, 20D",      "No", "stock-specific", "Tier 2"),
+    ("max_dd_60d",         "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Max drawdown over 60D window",            "No", "stock-specific", "Tier 2"),
+    ("max_dd_252d",        "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Max drawdown over 252D window",           "No", "stock-specific", "Tier 2"),
+    ("vol_of_vol_20d",     "Tail Risk", "yfinance", "{code}.T", "add_features.py", "Std of rolling 5D vol over 20D",         "No", "stock-specific", "Tier 3"),
+    ("gain_loss_ratio_20d","Tail Risk", "yfinance", "{code}.T", "add_features.py", "Mean gain / mean loss, 20D",              "No", "stock-specific", "Tier 3"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP C — VOLUME & PRICE-VOLUME  (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("vol_ratio_5_252",  "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "vol_avg(5D) / vol_avg(252D)",          "No", "stock-specific", "Tier 2"),
+    ("vol_ratio_20_252", "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "vol_avg(20D) / vol_avg(252D)",         "No", "stock-specific", "Tier 2"),
+    ("price_vol_diverge","Volume & Flow", "yfinance", "{code}.T", "add_features.py", "sign(ret) ≠ sign(vol_chg_5D) flag",   "No", "stock-specific", "Tier 3"),
+    ("dv_zscore_252d",   "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "Z-score of yen_volume vs 252D avg",   "No", "stock-specific", "Tier 2"),
+    ("turnover_decel",   "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "vol_avg(5D)/vol_avg(20D) - 1",        "No", "stock-specific", "Tier 2"),
+    ("vol_imbalance_20d","Volume & Flow", "yfinance", "{code}.T", "add_features.py", "(up_vol - down_vol) / total_vol 20D", "No", "stock-specific", "Tier 2"),
+    ("cmf_20",           "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "Chaikin Money Flow, 20-period",       "No", "stock-specific", "Tier 2"),
+    ("vwap_dev_20d",     "Volume & Flow", "yfinance", "{code}.T", "add_features.py", "(close - VWAP_20D) / VWAP_20D",       "No", "stock-specific", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP E — MACRO REGIME (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("nikkei_vi",        "Macro Regime", "yfinance", "^VNKY",  "add_features.py", "Nikkei Volatility Index — NOT AVAILABLE on yfinance (all NaN)", "Yes", "date-level", "Tier 2"),
+    ("nikkei_vi_ret_1m", "Macro Regime", "yfinance", "^VNKY",  "add_features.py", "nikkei_vi.pct_change(21) — NaN (source unavailable)",           "Yes", "date-level", "Tier 2"),
+    ("nikkei_vi_zscore", "Macro Regime", "yfinance", "^VNKY",  "add_features.py", "nikkei_vi z-score vs 252D — NaN (source unavailable)",          "Yes", "date-level", "Tier 2"),
+    ("vix",              "Macro Regime", "yfinance", "^VIX",   "add_features.py", "CBOE VIX level",                                                 "No",  "date-level", "Tier 2"),
+    ("vix_ret_1m",       "Macro Regime", "yfinance", "^VIX",   "add_features.py", "vix.pct_change(21)",                                             "No",  "date-level", "Tier 2"),
+    ("vix_zscore",       "Macro Regime", "yfinance", "^VIX",   "add_features.py", "(vix - vix.rolling(252).mean()) / std",                          "No",  "date-level", "Tier 2"),
+    ("usdjpy_level",     "Macro Regime", "yfinance", "JPY=X",  "add_features.py", "USD/JPY spot close",                                             "No",  "date-level", "Tier 1"),
+    ("usdjpy_zscore",    "Macro Regime", "yfinance", "JPY=X",  "add_features.py", "(usdjpy - rolling_mean(252)) / std",                             "No",  "date-level", "Tier 1"),
+    ("usdjpy_ret_1w",    "Macro Regime", "yfinance", "JPY=X",  "add_features.py", "log(usdjpy).diff(5)",                                            "No",  "date-level", "Tier 1"),
+    ("usdjpy_trend",     "Macro Regime", "yfinance", "JPY=X",  "add_features.py", "EMA(50)/EMA(200) - 1",                                           "No",  "date-level", "Tier 1"),
+    ("usdjpy_vol_20d",   "Macro Regime", "yfinance", "JPY=X",  "add_features.py", "std(log_ret_usdjpy, 20D) × √252",                               "No",  "date-level", "Tier 2"),
+    ("us10y",            "Macro Regime", "yfinance", "^TNX",   "add_features.py", "US 10Y Treasury yield (%)",                                      "No",  "date-level", "Tier 2"),
+    ("us10y_ret_1m",     "Macro Regime", "yfinance", "^TNX",   "add_features.py", "us10y.diff(21) — yield change",                                  "No",  "date-level", "Tier 2"),
+    ("us_curve_5_10",    "Macro Regime", "yfinance", "^TNX+^FVX", "add_features.py", "US 10Y minus US 5Y yield",                                   "No",  "date-level", "Tier 2"),
+    ("spx_ret_1d",       "Macro Regime", "yfinance", "^GSPC",  "add_features.py", "S&P 500 log return 1D (overnight signal)",                       "No",  "date-level", "Tier 3"),
+    ("spx_ret_1m",       "Macro Regime", "yfinance", "^GSPC",  "add_features.py", "S&P 500 log return 21D",                                         "No",  "date-level", "Tier 3"),
+    ("spx_trend",        "Macro Regime", "yfinance", "^GSPC",  "add_features.py", "SPX EMA(50)/EMA(200) - 1",                                       "No",  "date-level", "Tier 3"),
+    ("nky_ret_1m",       "Macro Regime", "yfinance", "^N225",  "add_features.py", "NKY 225 log return 21D",                                         "No",  "date-level", "Tier 2"),
+    ("nky_ret_3m",       "Macro Regime", "yfinance", "^N225",  "add_features.py", "NKY 225 log return 63D",                                         "No",  "date-level", "Tier 2"),
+    ("nky_ret_12m",      "Macro Regime", "yfinance", "^N225",  "add_features.py", "NKY 225 log return 252D",                                        "No",  "date-level", "Tier 2"),
+    ("nky_trend",        "Macro Regime", "yfinance", "^N225",  "add_features.py", "NKY 225 EMA(50)/EMA(200) - 1",                                   "No",  "date-level", "Tier 2"),
+    ("nky_vol_20d",      "Macro Regime", "yfinance", "^N225",  "add_features.py", "std(log_ret_nky, 20D) × √252",                                   "No",  "date-level", "Tier 2"),
+    ("risk_off_flag",    "Macro Regime", "yfinance", "^VIX+^N225", "add_features.py", "VIX > 3M MA AND NKY < EMA50",                               "No",  "date-level", "Tier 2"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP D — CROSS-SECTIONAL RANKS  (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("cs_rank_ret_1d",         "Cross-Sectional", "Derived from ret_1d",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_ret_1w",         "Cross-Sectional", "Derived from ret_1w",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_ret_1m",         "Cross-Sectional", "Derived from ret_1m",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_ret_3m",         "Cross-Sectional", "Derived from ret_3m",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_ret_12m",        "Cross-Sectional", "Derived from ret_12m",        "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_reversal_1m",    "Cross-Sectional", "Derived from reversal_1m",    "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 1"),
+    ("cs_rank_momentum_12_1",  "Cross-Sectional", "Derived from momentum_12_1",  "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 2"),
+    ("cs_rank_vol_20d",        "Cross-Sectional", "Derived from vol_20d",        "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 1"),
+    ("cs_rank_vol_60d",        "Cross-Sectional", "Derived from vol_60d",        "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 1"),
+    ("cs_rank_amihud_60d",     "Cross-Sectional", "Derived from amihud_60d",     "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 1"),
+    ("cs_rank_rsi_14",         "Cross-Sectional", "Derived from rsi_14",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_bb_pos",         "Cross-Sectional", "Derived from bb_pos",         "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_high_to_price",  "Cross-Sectional", "Derived from high_to_price",  "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 2"),
+    ("cs_rank_log_yen_volume", "Cross-Sectional", "Derived from log_yen_volume", "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_max_ret_1m",     "Cross-Sectional", "Derived from max_ret_1m",     "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 2"),
+    ("cs_rank_skew_20d",       "Cross-Sectional", "Derived from skew_20d",       "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "Tier 2"),
+    ("cs_rank_stoch_k",        "Cross-Sectional", "Derived from stoch_k",        "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_rank_obv_ret_1m",     "Cross-Sectional", "Derived from obv_ret_1m",     "—", "add_features.py", "Percentile rank in universe [0,1]", "No", "date-level", "—"),
+    ("cs_z_vol_20d",           "Cross-Sectional", "Derived from vol_20d",        "—", "add_features.py", "Z-score within universe on date",   "No", "date-level", "—"),
+    ("cs_z_ret_1m",            "Cross-Sectional", "Derived from ret_1m",         "—", "add_features.py", "Z-score within universe on date",   "No", "date-level", "—"),
+    ("cs_z_ret_12m",           "Cross-Sectional", "Derived from ret_12m",        "—", "add_features.py", "Z-score within universe on date",   "No", "date-level", "—"),
+    ("cs_z_amihud_60d",        "Cross-Sectional", "Derived from amihud_60d",     "—", "add_features.py", "Z-score within universe on date",   "No", "date-level", "—"),
+    ("cs_decile_ret_1m",       "Cross-Sectional", "Derived from ret_1m",         "—", "add_features.py", "Decile 1–10 within universe",       "No", "date-level", "—"),
+    ("cs_decile_momentum_12_1","Cross-Sectional", "Derived from momentum_12_1",  "—", "add_features.py", "Decile 1–10 within universe",       "No", "date-level", "—"),
+    ("cs_decile_vol_20d",      "Cross-Sectional", "Derived from vol_20d",        "—", "add_features.py", "Decile 1–10 within universe",       "No", "date-level", "—"),
+
+    # ─────────────────────────────────────────────────────────────────
+    # GROUP F — COMPOSITE FACTOR SCORES  (add_features.py)
+    # ─────────────────────────────────────────────────────────────────
+    ("score_reversal",  "Composite Score", "Derived from cs_rank features", "—", "add_features.py", "IC-weighted: reversal_1m(50%) + ret_1w(30%) + stoch_k(20%)", "No", "stock-specific", "Tier 1"),
+    ("score_momentum",  "Composite Score", "Derived from cs_rank features", "—", "add_features.py", "IC-weighted: momentum_12_1(60%) + obv_ret_1m(25%) + ret_3m(15%)", "No", "stock-specific", "Tier 2"),
+    ("score_low_vol",   "Composite Score", "Derived from cs_rank features", "—", "add_features.py", "IC-weighted: inv_vol_20d(50%) + inv_vol_60d(25%) + liq(15%) + inv_max_ret(10%)", "No", "stock-specific", "Tier 1"),
+    ("score_liquidity", "Composite Score", "Derived from cs_rank features", "—", "add_features.py", "IC-weighted: inv_amihud(50%) + log_yen_vol(30%) + vol_ratio(20%)", "No", "stock-specific", "Tier 2"),
+    ("score_technical", "Composite Score", "Derived from cs_rank features", "—", "add_features.py", "Equal-weight: bb_pos + stoch_k + rsi_14 + obv_ret_1m (25% each)", "No", "stock-specific", "Tier 2"),
+]
+
+COLS = [
+    "feature",
+    "group",
+    "data_source",
+    "ticker_or_series",
+    "computed_in",
+    "formula_or_description",
+    "needs_fix",
+    "scope",
+    "research_tier",
+]
+
+df = pd.DataFrame(ROWS, columns=COLS)
+
+out = Path(__file__).parent / "feature_source_map.csv"
+df.to_csv(out, index=False)
+
+print(f"Saved: {out.name}")
+print(f"Rows : {len(df)}")
+print(f"\nGroup breakdown:")
+print(df["group"].value_counts().to_string())
+print(f"\nData source breakdown:")
+print(df["data_source"].value_counts().to_string())
+print(f"\nTier breakdown:")
+print(df["research_tier"].value_counts().to_string())
