@@ -281,28 +281,38 @@ def compute_features(
     out["high_to_price"] = high_52w / c.replace(0, np.nan)  # >1 means below 52w-high
 
     # ── Amihud illiquidity (60-day rolling) ─────────────────────────────────
+    # min_periods=50 tolerates up to 10 zero-volume holiday rows per 60-day window.
+    # yfinance represents some Japanese national holidays as volume=0 rows (not NaN),
+    # so the raw series has ~14 such gaps/year. Without min_periods, rolling(60)
+    # returns NaN any time a zero slips in, making 2016-2019 nearly 100% NaN.
     yen_vol_nonzero   = out["yen_volume"].replace(0, np.nan)
     amihud_daily      = out["ret_1d"].abs() / yen_vol_nonzero
-    out["amihud_60d"] = amihud_daily.rolling(60).mean()
+    out["amihud_60d"] = amihud_daily.rolling(60, min_periods=50).mean()
 
     # ── Relative volume ──────────────────────────────────────────────────────
     vol_nonzero = v.replace(0, np.nan)
     out["rel_volume_5_60"] = (
-        vol_nonzero.rolling(5).mean() / vol_nonzero.rolling(60).mean()
+        vol_nonzero.rolling(5,  min_periods=4).mean() /
+        vol_nonzero.rolling(60, min_periods=50).mean()
     )
     out["log_yen_volume"] = np.log(yen_vol_nonzero)
 
-    # ── Market beta (60-day rolling OLS beta to NKY 225) ────────────────────
+    # ── Market beta (60-day and 252-day rolling OLS beta to NKY 225) ────────
+    # min_periods=230 for 252d window: tolerates up to 22 missing days (worst year
+    # 2018 has 16 holiday zeros). min_periods=50 for 60d window.
     stock_ret_aligned  = out["ret_1d"].reindex(nky_ret.index).ffill()
 
-    def rolling_beta(s_ret: pd.Series, m_ret: pd.Series, w: int = 60) -> pd.Series:
-        cov = s_ret.rolling(w).cov(m_ret)
-        var = m_ret.rolling(w).var().replace(0, np.nan)
+    def rolling_beta(s_ret: pd.Series, m_ret: pd.Series,
+                     w: int = 60, mp: int = None) -> pd.Series:
+        if mp is None:
+            mp = max(1, w - 22)
+        cov = s_ret.rolling(w, min_periods=mp).cov(m_ret)
+        var = m_ret.rolling(w, min_periods=mp).var().replace(0, np.nan)
         return cov / var
 
-    out["beta_nky_60d"]    = rolling_beta(out["ret_1d"], nky_ret,    60)
-    out["beta_nky_252d"]   = rolling_beta(out["ret_1d"], nky_ret,   252)
-    out["beta_usdjpy_60d"] = rolling_beta(out["ret_1d"], usdjpy_ret, 60)
+    out["beta_nky_60d"]    = rolling_beta(out["ret_1d"], nky_ret,    60,  50)
+    out["beta_nky_252d"]   = rolling_beta(out["ret_1d"], nky_ret,   252, 230)
+    out["beta_usdjpy_60d"] = rolling_beta(out["ret_1d"], usdjpy_ret, 60,  50)
 
     # ── USD/JPY macro features (same for all stocks, cross-sectional) ─────
     out["usdjpy_ret_1m"] = usdjpy_ret.rolling(21).sum()
@@ -311,7 +321,7 @@ def compute_features(
     # ── Idiosyncratic volatility ─────────────────────────────────────────────
     # vol of OLS residuals after removing market exposure
     resid = out["ret_1d"] - out["beta_nky_60d"] * nky_ret
-    out["idio_vol_60d"] = resid.rolling(60).std() * np.sqrt(252)
+    out["idio_vol_60d"] = resid.rolling(60, min_periods=50).std() * np.sqrt(252)
 
     # ── Calendar features ────────────────────────────────────────────────────
     idx = out.index

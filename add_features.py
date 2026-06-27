@@ -61,7 +61,7 @@ START = "2014-01-01"
 
 def add_oscillators(out: pd.DataFrame, c, h, l, v) -> pd.DataFrame:
     """
-    Stochastic, ATR, Williams %R, CCI, MFI, ROC, OBV, Donchian, Keltner.
+    Stochastic, ATR, Williams %R, CCI, MFI, ROC, OBV, Donchian, Keltner, ADX.
     All computed from OHLCV — no extra data download required.
     """
     # ── Stochastic oscillator K (14-period), D (3-period SMA of K) ──────────
@@ -132,6 +132,33 @@ def add_oscillators(out: pd.DataFrame, c, h, l, v) -> pd.DataFrame:
     kelt_lower = ema20 - 2 * atr14
     kelt_rng   = (kelt_upper - kelt_lower).replace(0, np.nan)
     out["keltner_pos"] = (c - kelt_lower) / kelt_rng
+
+    # ── ADX — Average Directional Index (14D, Wilder 1978) ───────────────────
+    # ADX measures trend STRENGTH (0–100), not direction.
+    #   ADX > 25 → strong trend (up or down); ADX < 20 → range-bound / choppy.
+    # di_diff_14 = +DI − −DI: positive means bullish trend dominates.
+    #   This directional component is a momentum signal (added to RANK_COLS).
+    # Wilder smoothing = EMA with alpha = 1/N (heavier weight on recent bars
+    # than a simple rolling mean, lighter than standard EMA span=N).
+    prev_h   = h.shift(1)
+    prev_l   = l.shift(1)
+    dm_plus  = (h - prev_h).clip(lower=0)
+    dm_minus = (prev_l - l).clip(lower=0)
+    # When both DMs are equal, both zero out; otherwise the smaller is zeroed
+    dm_plus  = dm_plus.where(dm_plus >= dm_minus, 0.0)
+    dm_minus = dm_minus.where(dm_minus > dm_plus,  0.0)
+
+    atr_w    = tr.ewm(alpha=1/14, adjust=False).mean().replace(0, np.nan)
+    di_plus  = 100 * dm_plus.ewm(alpha=1/14,  adjust=False).mean() / atr_w
+    di_minus = 100 * dm_minus.ewm(alpha=1/14, adjust=False).mean() / atr_w
+    di_sum   = (di_plus + di_minus).replace(0, np.nan)
+    dx       = 100 * (di_plus - di_minus).abs() / di_sum
+    adx      = dx.ewm(alpha=1/14, adjust=False).mean()
+
+    out["adx_14"]      = adx
+    out["di_plus_14"]  = di_plus
+    out["di_minus_14"] = di_minus
+    out["di_diff_14"]  = di_plus - di_minus   # momentum: positive = bullish
 
     return out
 
@@ -280,6 +307,8 @@ RANK_COLS = [
     "skew_20d",
     "stoch_k",
     "obv_ret_1m",
+    "di_diff_14",   # ADX directional: +DI−−DI, positive=bullish trend
+    "adx_14",       # ADX trend strength: >25 strong trend, <20 choppy
 ]
 
 def add_cross_sectional_ranks(panel: pd.DataFrame) -> pd.DataFrame:
@@ -643,6 +672,12 @@ def main():
                 df = pd.concat({f.lower(): raw[(f, yf_tk)] for f in fields}, axis=1)
 
             df = df.dropna(how="all")
+            # yfinance inconsistently represents Japanese national holidays:
+            # some years → all-NaN rows (removed by dropna above)
+            # other years → volume=0 with close=prev_close (must remove separately)
+            # With these holiday zeros left in, v.replace(0,NaN).rolling(252) has
+            # max consecutive non-NaN streak of only ~55 days → rolling always NaN.
+            df = df[df["volume"] > 0]
             if len(df) < 60:
                 continue
 
