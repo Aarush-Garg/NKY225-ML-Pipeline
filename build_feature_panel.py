@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 START       = "2014-06-01"
 END         = datetime.today().strftime("%Y-%m-%d")
 CACHE_DIR   = Path(__file__).parent / "_cache"
-OUT_FILE    = Path(__file__).parent / "nky225_features.parquet"
+DATA_DIR    = Path.home() / "Library/CloudStorage/OneDrive-Personal/Aarush-One Drive/Summer 2026/Quant Papa Internship"
+OUT_FILE    = DATA_DIR / "nky225_features.parquet"
 
 CACHE_DIR.mkdir(exist_ok=True)
 

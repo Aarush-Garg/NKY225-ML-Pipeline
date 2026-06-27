@@ -47,7 +47,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-FEATS_FILE  = Path(__file__).parent / "nky225_features.parquet"
+DATA_DIR    = Path.home() / "Library/CloudStorage/OneDrive-Personal/Aarush-One Drive/Summer 2026/Quant Papa Internship"
+FEATS_FILE  = DATA_DIR / "nky225_features.parquet"
 CACHE_DIR   = Path(__file__).parent / "_cache"
 MACRO_CACHE = CACHE_DIR / "macro_aux.parquet"
 START = "2014-01-01"

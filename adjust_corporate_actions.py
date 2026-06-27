@@ -51,7 +51,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 BASE       = Path(__file__).parent
-FEATS_FILE = BASE / "nky225_features.parquet"
+DATA_DIR   = Path.home() / "Library/CloudStorage/OneDrive-Personal/Aarush-One Drive/Summer 2026/Quant Papa Internship"
+FEATS_FILE = DATA_DIR / "nky225_features.parquet"
 CACHE_DIR  = BASE / "_cache"
 
 # ── Batch artifact dates to exclude (yfinance reporting artefacts, not real events)

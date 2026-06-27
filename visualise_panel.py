@@ -59,8 +59,9 @@ OUT     = Path(__file__).parent / "NKY225_Panel_Dashboard.pdf"
 # Load data
 # ─────────────────────────────────────────────────────────────────────────────
 print("Loading parquet files …")
-feats = pd.read_parquet(Path(__file__).parent / "nky225_features.parquet")
-const = pd.read_parquet(Path(__file__).parent / "nky225_constituents.parquet")
+_DATA = Path.home() / "Library/CloudStorage/OneDrive-Personal/Aarush-One Drive/Summer 2026/Quant Papa Internship"
+feats = pd.read_parquet(_DATA / "nky225_features.parquet")
+const = pd.read_parquet(_DATA / "nky225_constituents.parquet")
 
 dates   = feats.index.get_level_values("date")
 tickers = feats.index.get_level_values("ticker")

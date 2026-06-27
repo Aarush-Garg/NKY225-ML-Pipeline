@@ -40,8 +40,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-OUT_CONST   = Path(__file__).parent / "nky225_constituents.parquet"
-OUT_FEATS   = Path(__file__).parent / "nky225_features.parquet"
+DATA_DIR    = Path.home() / "Library/CloudStorage/OneDrive-Personal/Aarush-One Drive/Summer 2026/Quant Papa Internship"
+OUT_CONST   = DATA_DIR / "nky225_constituents.parquet"
+OUT_FEATS   = DATA_DIR / "nky225_features.parquet"
 CACHE_OHLCV = Path(__file__).parent / "_cache" / "raw_ohlcv.parquet"
 
 # ─────────────────────────────────────────────────────────────────────────────
