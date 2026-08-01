@@ -1373,11 +1373,11 @@ CATEGORY_NORM_DEFAULTS: dict[str, dict] = {
     "quality":       {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — AQR QMJ safety
     "growth":        {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — AQR QMJ growth
     "macro":         {"ts_windows": [252], "xs": False, "winsorize": True,  "log_first": False},  # TS only — no cross-section variance
-    "calendar":      {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # binary / ordinal dummies
+    "calendar":      {"ts_windows": [252], "xs": False, "winsorize": False, "log_first": False},  # TS z-score of seasonal/binary signals
     "corporate":     {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only; flag overridden below
     "index":         {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
-    "composite":     {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # pre-normalised scores
-    "cs_rank":       {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # already normalised
+    "composite":     {"ts_windows": [252], "xs": False, "winsorize": True,  "log_first": False},  # TS of composite scores
+    "cs_rank":       {"ts_windows": [252], "xs": False, "winsorize": False, "log_first": False},  # TS of ranks: "is rank at historical extreme?"
 }
 
 NORM_OVERRIDES: dict[str, dict] = {
@@ -1416,30 +1416,21 @@ NORM_OVERRIDES: dict[str, dict] = {
     # magnitude — log transform is non-negotiable before standardization.
     "amihud_60d":        {"ts_windows": [],          "xs": True,  "winsorize": True,  "log_first": True},
 
-    # ── OBV raw: cumulative non-stationary series — skip z-scoring ─────────
-    # Use obv_ret_1m / obv_ret_3m (rate-of-change variants) instead.
-    "obv":               {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    # ── OBV raw: use TS z-score (captures trending OBV regimes) ─────────────
+    # obv_ret_1m / obv_ret_3m additionally provide rate-of-change normalizations.
+    # "obv" uses technical category default: ts=[252], xs=True.
 
-    # ── Binary / crossover signals: skip entirely ──────────────────────────
-    "ema_cross_5_20":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "ema_cross_50_200":  {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "stoch_kd_cross":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "is_monday":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "is_friday":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "risk_off_flag":     {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "in_index":          {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "cap_raise_flag":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "nky_trend":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "spx_trend":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "usdjpy_trend":      {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "bench_weight":      {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "day_of_week":       {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "fiscal_quarter":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    # ── Binary / crossover signals → use category defaults ────────────────
+    # ema_cross_5_20, ema_cross_50_200, stoch_kd_cross → technical: ts=[252], xs=True
+    # is_monday, is_friday, day_of_week, fiscal_quarter  → calendar:  ts=[252], xs=False
+    # risk_off_flag, nky_trend, spx_trend, usdjpy_trend  → macro:     ts=[252], xs=False
+    # cap_raise_flag                                      → corporate: ts=[],    xs=True
+    # in_index, bench_weight                              → index:     ts=[252], xs=True
 
-    # ── Already time-series z-scored — skip TS; XS only where applicable ──
+    # ── Already TS z-scored: re-normalize to capture regime extremes ──────
+    # vix_zscore, usdjpy_zscore → macro: ts=[252], xs=False
+    # dv_zscore_252d gets XS only (it's already TS-normalised, XS still useful)
     "dv_zscore_252d":    {"ts_windows": [],          "xs": True,  "winsorize": False, "log_first": False},
-    "vix_zscore":        {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
-    "usdjpy_zscore":     {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
 
     # ── Macro returns: TS window matched to signal horizon ────────────────
     # Shorter windows = more responsive to current regime vs static 252d baseline
