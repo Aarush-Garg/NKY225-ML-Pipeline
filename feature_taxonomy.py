@@ -1325,6 +1325,153 @@ TAXONOMY: dict[str, dict] = {
     },
 }
 
+# ─── Normalization configuration  (FULL TAXONOMY AUDIT — stable) ────────────
+#
+# Keys in each config dict:
+#   ts_windows : list[int]  — rolling window lengths (trading days) for TS
+#                             z-score.  Empty list = skip TS normalization.
+#   xs         : bool       — compute cross-sectional z-score across tickers
+#                             per date.
+#   winsorize  : bool       — clip each cross-section at [1st, 99th] percentile
+#                             before z-scoring.  Mandatory per Hou-Xue-Zhang
+#                             (2020 RFS) and Green-Hand-Zhang (2017 RFS).
+#                             MSCI Barra USE4 uses ±3σ clipping; 1%–99% quantile
+#                             winsorization is equivalent and distribution-free.
+#   log_first  : bool       — apply log1p() before any normalization.  Required
+#                             for severely right-skewed features (Amihud 2002
+#                             JFM; Lou-Shu 2016 JFE).
+#
+# Category-level rationale (literature basis):
+#   • CS z-score is the canonical approach for relative-value signals:
+#     Hou-Xue-Zhang (2020), Green-Hand-Zhang (2017), MSCI Barra USE4/JPE4,
+#     AQR QMJ (Asness-Frazzini-Pedersen 2019 RFS) — all use CS z-score after
+#     winsorization for every stock characteristic in cross-sectional regressions.
+#   • TS z-score (Moskowitz-Ooi-Pedersen 2012 JFE "Time Series Momentum")
+#     captures intra-stock regime shifts and provides orthogonal information to
+#     CS z-score for return-based signals.
+#   • FUNDAMENTALS (valuation / profitability / quality / growth) → CS only:
+#     These slow-moving LOCF'd series carry no meaningful within-stock TS signal
+#     over a 252-day window.  Canonical factor models (FF5, AQR QMJ) use purely
+#     cross-sectional ranking / z-scoring for all accounting characteristics.
+#   • REVERSAL → CS only: short-term reversal is a purely cross-sectional
+#     phenomenon (Jegadeesh 1990 JF; Lo-MacKinlay 1990 RFS).
+#   • MACRO → TS only: identical value across all tickers on any date → CS
+#     z-score is degenerate (zero cross-sectional variance).
+#   • Binary / bounded / pre-normalised → skip.
+
+CATEGORY_NORM_DEFAULTS: dict[str, dict] = {
+    #                          ts_windows      xs      winsorize  log_first
+    "return":        {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "momentum":      {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "reversal":      {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — Jegadeesh (1990)
+    "volatility":    {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "risk":          {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "technical":     {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "liquidity":     {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "valuation":     {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — FF HML, AQR Value
+    "profitability": {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — AQR QMJ, FF RMW
+    "quality":       {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — AQR QMJ safety
+    "growth":        {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only — AQR QMJ growth
+    "macro":         {"ts_windows": [252], "xs": False, "winsorize": True,  "log_first": False},  # TS only — no cross-section variance
+    "calendar":      {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # binary / ordinal dummies
+    "corporate":     {"ts_windows": [],    "xs": True,  "winsorize": True,  "log_first": False},  # CS only; flag overridden below
+    "index":         {"ts_windows": [252], "xs": True,  "winsorize": True,  "log_first": False},
+    "composite":     {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # pre-normalised scores
+    "cs_rank":       {"ts_windows": [],    "xs": False, "winsorize": False, "log_first": False},  # already normalised
+}
+
+NORM_OVERRIDES: dict[str, dict] = {
+
+    # ── Short-horizon returns: 60-day TS (3-month regime window) ──────────
+    # Moskowitz-Ooi-Pedersen (2012 JFE): TS z-score adds orthogonal info to CS
+    "ret_1d":            {"ts_windows": [60],        "xs": True,  "winsorize": True,  "log_first": False},
+    "adj_ret_1d":        {"ts_windows": [60],        "xs": True,  "winsorize": True,  "log_first": False},
+    "ret_1w":            {"ts_windows": [60],        "xs": True,  "winsorize": True,  "log_first": False},
+
+    # ── Medium-horizon returns: two TS windows + CS ───────────────────────
+    # 60d/126d = intermediate regime; 252d = full-year baseline
+    # McLean-Pontiff (2016 JF): dual-window captures faster post-pub decay
+    "ret_1m":            {"ts_windows": [60,  252],  "xs": True,  "winsorize": True,  "log_first": False},
+    "ret_3m":            {"ts_windows": [126, 252],  "xs": True,  "winsorize": True,  "log_first": False},
+
+    # ── Short ROC oscillators ─────────────────────────────────────────────
+    "roc_5":             {"ts_windows": [60],        "xs": True,  "winsorize": True,  "log_first": False},
+    "roc_10":            {"ts_windows": [60],        "xs": True,  "winsorize": True,  "log_first": False},
+    "roc_20":            {"ts_windows": [126],       "xs": True,  "winsorize": True,  "log_first": False},
+
+    # ── Price-unit technicals: TS only (CS across ¥100–¥100k stocks invalid)
+    # Research: MACD = EMA12 - EMA26 in absolute JPY; cross-sectional z-score
+    # confounds price-level with momentum signal.  DB "Seven Sins" (2014) §3.
+    "macd_line":         {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "macd_signal":       {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "macd_hist":         {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "atr_14":            {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+
+    # atr_pct is ATR/price (%) — price-normalized, CS z-score is now meaningful
+    # (override needed: category=volatility defaults to ts=[252]+xs; this confirms it)
+    "atr_pct":           {"ts_windows": [252],       "xs": True,  "winsorize": True,  "log_first": False},
+
+    # ── Amihud illiquidity: log1p mandatory before CS z-score ─────────────
+    # Amihud (2002 JFM); Lou-Shu (2016 JFE): distribution spans orders of
+    # magnitude — log transform is non-negotiable before standardization.
+    "amihud_60d":        {"ts_windows": [],          "xs": True,  "winsorize": True,  "log_first": True},
+
+    # ── OBV raw: cumulative non-stationary series — skip z-scoring ─────────
+    # Use obv_ret_1m / obv_ret_3m (rate-of-change variants) instead.
+    "obv":               {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+
+    # ── Binary / crossover signals: skip entirely ──────────────────────────
+    "ema_cross_5_20":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "ema_cross_50_200":  {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "stoch_kd_cross":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "is_monday":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "is_friday":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "risk_off_flag":     {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "in_index":          {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "cap_raise_flag":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "nky_trend":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "spx_trend":         {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "usdjpy_trend":      {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "bench_weight":      {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "day_of_week":       {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "fiscal_quarter":    {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+
+    # ── Already time-series z-scored — skip TS; XS only where applicable ──
+    "dv_zscore_252d":    {"ts_windows": [],          "xs": True,  "winsorize": False, "log_first": False},
+    "vix_zscore":        {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+    "usdjpy_zscore":     {"ts_windows": [],          "xs": False, "winsorize": False, "log_first": False},
+
+    # ── Macro returns: TS window matched to signal horizon ────────────────
+    # Shorter windows = more responsive to current regime vs static 252d baseline
+    "spx_ret_1d":        {"ts_windows": [63],        "xs": False, "winsorize": True,  "log_first": False},
+    "vix_ret_1m":        {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "usdjpy_ret_1w":     {"ts_windows": [63],        "xs": False, "winsorize": True,  "log_first": False},
+    "usdjpy_ret_1m":     {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "nky_ret_1m":        {"ts_windows": [126],       "xs": False, "winsorize": True,  "log_first": False},
+    "nky_ret_3m":        {"ts_windows": [252],       "xs": False, "winsorize": True,  "log_first": False},
+}
+
+
+def get_norm_config(col: str) -> dict:
+    """
+    Return normalization config for a column:
+
+      ts_windows : list[int] — rolling window lengths for TS z-score (empty = skip)
+      xs         : bool      — compute cross-sectional z-score across tickers
+      winsorize  : bool      — clip at 1st–99th percentile before z-scoring
+      log_first  : bool      — apply log1p() before any normalization
+
+    Sources: Hou-Xue-Zhang (2020), Green-Hand-Zhang (2017), MSCI Barra USE4,
+             AQR QMJ (Asness-Frazzini-Pedersen 2019), Moskowitz-Ooi-Pedersen (2012).
+    """
+    if col in NORM_OVERRIDES:
+        return dict(NORM_OVERRIDES[col])
+    cat = TAXONOMY.get(col, {}).get("category")
+    return dict(CATEGORY_NORM_DEFAULTS.get(cat, {
+        "ts_windows": [], "xs": False, "winsorize": False, "log_first": False,
+    }))
+
+
 # ─── Flat name map (col_name → canonical_name) ───────────────────────────────
 # This is the primary lookup used by normalize_features.py.
 
